@@ -1,7 +1,8 @@
 'use strict';
-var AsyncStorage = require('react-native').AsyncStorage;
+var React = require('react-native');
 var Util = require('./util.js');
 var Filter = require('./filter.js')
+import AsyncStorage from 'rn-async-storage'
 
 class Model {
 
@@ -19,129 +20,139 @@ class Model {
     }
 
     async getDatabase() {
-        var database = await AsyncStorage.getItem(this.dbName);
-        if (database) {
-            return Object.assign({}, JSON.parse(database));
-        } else {
-            return this.createDatabase();
-        }
+
+        return new Promise(async(resolve, reject) => {
+            var database = await AsyncStorage.getItem(this.dbName);
+            if (database) {
+                resolve(Object.assign({}, JSON.parse(database)));
+            } else {
+                resolve(this.createDatabase());
+            }
+        });
+
     }
 
     async initModel() {
         this.database = await this.getDatabase();
-        this.model = this.database[this.modelName]
-            ? this.database[this.modelName]
-            : {
-                'totalrows': 0,
-                'autoinc': 1,
-                'rows': {}
-            };
+        this.model = this.database[this.modelName] ? this.database[this.modelName] : {
+            'totalrows': 0,
+            'autoinc': 1,
+            'rows': {}
+        };
         this.database[this.modelName] = this.database[this.modelName] || this.model;
     }
 
     //destroy
     async destroy() {
-        var database = await AsyncStorage.getItem(this.dbName);
-        return database ? await AsyncStorage.removeItem(this.dbName) : null;
+        return new Promise(async(resolve, reject) => {
+            var database = await AsyncStorage.getItem(this.dbName);
+            resolve( database?await AsyncStorage.removeItem(this.dbName):null );
+        });
     }
 
     // add
     async add(data) {
         await this.initModel();
-        var autoinc = this.model.autoinc++;
-        if (this.model.rows[autoinc]) {
-            return Util.error("ReactNativeStore error: Storage already contains _id '" + autoinc + "'");
-        }
-        if (data._id) {
-            return Util.error("ReactNativeStore error: Don't need _id with add method");
-        }
-        data._id = autoinc;
-        this.model.rows[autoinc] = data;
-        this.model.totalrows++;
-        this.database[this.modelName] = this.model;
-        await AsyncStorage.setItem(this.dbName, JSON.stringify(this.database));
-        return this.model.rows[data._id];
-    }
-
-    // multi add
-    async multiAdd(data) {
-        await this.initModel();
-        for (var key in data) {
-            var value = data[key];
-            var autoinc = this.model.autoinc++;
-            if (this.model.rows[autoinc]) {
-                return Util.error("ReactNativeStore error: Storage already contains _id '" + autoinc + "'");
+        return new Promise(async(resolve, reject) => {
+            try {
+                var autoinc = this.model.autoinc++;
+                if (this.model.rows[autoinc]) {
+                    return Util.error("ReactNativeStore error: Storage already contains _id '" + autoinc + "'");
+                }
+                if(data._id){
+                    return Util.error("ReactNativeStore error: Don't need _id with add method");
+                }
+                data._id = autoinc;
+                this.model.rows[autoinc] = data;
+                this.model.totalrows++;
+                this.database[this.modelName] = this.model;
+                await AsyncStorage.setItem(this.dbName, JSON.stringify(this.database));
+                resolve(this.model.rows[data._id]);
+            } catch (error) {
+                Util.error('ReactNativeStore error: ' + error.message);
             }
-            if (value._id) {
-                return Util.error("ReactNativeStore error: Don't need _id with add method");
-            }
-            value._id = autoinc;
-            this.model.rows[autoinc] = value;
-            this.model.totalrows++;
-        }
-        this.database[this.modelName] = this.model;
-        await AsyncStorage.setItem(this.dbName, JSON.stringify(this.database));
-        return this.model.rows;
+        });
     }
 
     // update
     async update(data, filter) {
         await this.initModel();
         filter = filter || {};
-        if (data._id)
+        if(data._id)
             delete data._id;
-        var results = [];
-        var rows = this.model["rows"];
-        var filterResult = this.modelFilter.apply(rows, filter)
-        for (var row in rows) {
-            for (var element in filterResult) {
-                if (rows[row]['_id'] === filterResult[element]['_id']) {
-                    for (var i in data) {
-                        rows[row][i] = data[i];
+        return new Promise(async(resolve, reject) => {
+            try {
+                var results = [];
+                var rows = this.model["rows"];
+                var filterResult = this.modelFilter.apply(rows, filter)
+                for (var row in rows) {
+                    for (var element in filterResult) {
+                        if (rows[row]['_id'] === filterResult[element]['_id']) {
+                            for (var i in data) {
+                                rows[row][i] = data[i];
+                            }
+                            results.push(rows[row]);
+                            this.database[this.modelName] = this.model;
+                            await AsyncStorage.setItem(this.dbName, JSON.stringify(this.database));
+                        }
                     }
-                    results.push(rows[row]);
-                    this.database[this.modelName] = this.model;
-                    await AsyncStorage.setItem(this.dbName, JSON.stringify(this.database));
                 }
+                results.length ? resolve(results) : resolve(null);
+            } catch (error) {
+                Util.error('ReactNativeStore error: ' + error.message);
             }
-        }
-        return results.length ? results : null;
+        });
     }
 
     // remove a single entry by id
     async updateById(data, id) {
+
         var result = await this.update(data, {
             where: {
                 _id: id
             }
         });
-        return result ? result[0] : null;
+
+        return new Promise(async(resolve, reject) => {
+            if(result){
+                resolve(result[0])
+            }else{
+                resolve(null)
+            }
+        });
     }
 
     // remove
     async remove(filter) {
         await this.initModel();
         filter = filter || {};
-        var results = [];
-        var rowsToDelete = [];
-        var rows = this.model["rows"];
-        var filterResult = this.modelFilter.apply(rows, filter)
-        for (var row in rows) {
-            for (var element in filterResult) {
-                if (rows[row]['_id'] === filterResult[element]['_id'])
-                    rowsToDelete.push(row);
+        return new Promise(async(resolve, reject) => {
+            try {
+                var results = [];
+                var rowsToDelete = [];
+                var rows = this.model["rows"];
+                var filterResult = this.modelFilter.apply(rows, filter)
+                for (var row in rows) {
+                    for (var element in filterResult) {
+                        if (rows[row]['_id'] === filterResult[element]['_id'])
+                            rowsToDelete.push(row);
+                    }
                 }
+                for(var i in rowsToDelete) {
+                    var row = rowsToDelete[i];
+                    results.push(this.model["rows"][row]);
+                    delete this.model["rows"][row];
+                    this.model["totalrows"]--;
+                }
+                this.database[this.modelName] = this.model;
+                await AsyncStorage.setItem(this.dbName, JSON.stringify(this.database));
+                results.length ? resolve(results) : resolve(null);
+            } catch (error) {
+                Util.error('ReactNativeStore error: ' + error.message);
             }
-        for (var i in rowsToDelete) {
-            var row = rowsToDelete[i];
-            results.push(this.model["rows"][row]);
-            delete this.model["rows"][row];
-            this.model["totalrows"]--;
-        }
-        this.database[this.modelName] = this.model;
-        await AsyncStorage.setItem(this.dbName, JSON.stringify(this.database));
-        return results.length ? results : null;
+        });
     }
+
 
     // remove a single entry by id
     async removeById(id) {
@@ -150,17 +161,27 @@ class Model {
                 _id: id
             }
         });
-        return result ? result[0] : null;
+
+        return new Promise(async(resolve, reject) => {
+            if(result){
+                resolve(result[0])
+            }else{
+                resolve(null)
+            }
+        });
+
     }
 
     // find
     async find(filter) {
         await this.initModel();
         filter = filter || {};
-        var results = [];
-        var rows = this.model["rows"];
-        results = this.modelFilter.apply(rows, filter);
-        return results.length ? results : null;
+        return new Promise((resolve, reject) => {
+            var results = [];
+            var rows = this.model["rows"];
+            results = this.modelFilter.apply(rows, filter);
+            results.length ? resolve(results) : resolve(null);
+        });
     }
 
     // find a single entry by id
@@ -170,7 +191,15 @@ class Model {
                 _id: id
             }
         });
-        return result ? result[0] : null;
+
+        return new Promise(async(resolve, reject) => {
+            if(result){
+                resolve(result[0])
+            }else{
+                resolve(null)
+            }
+        });
+
     }
 
     // get
